@@ -1,0 +1,131 @@
+// Jam Bakery ordering platform — data model.
+// Dev: SQLite (file). Production: set DATABASE_URL to a Postgres connection
+// string (Supabase/Vercel Postgres/Neon all work unchanged) and switch
+// `provider` below to "postgresql" — no schema changes needed otherwise.
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Branch {
+  id         String      @id @default(cuid())
+  name       String
+  address    String
+  openTime   String // "09:00"
+  closeTime  String // "22:00"
+  orders     Order[]
+  cakeOrders CakeOrder[]
+  createdAt  DateTime    @default(now())
+}
+
+model MenuItem {
+  id           String       @id @default(cuid())
+  slug         String       @unique
+  name         String
+  category     String
+  priceCents   Int
+  imagePath    String
+  trackStock   Boolean      @default(true)
+  defaultStock Int          @default(0)
+  active       Boolean      @default(true)
+  sortOrder    Int          @default(0)
+  dailyStocks  DailyStock[]
+  orderItems   OrderItem[]
+}
+
+// One row per (date, menuItem): how many units are left to sell today.
+// Created lazily from MenuItem.defaultStock the first time it's touched,
+// then decremented transactionally on every paid order.
+model DailyStock {
+  id         String   @id @default(cuid())
+  date       String // "2026-11-03"
+  menuItemId String
+  remaining  Int
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@unique([date, menuItemId])
+}
+
+enum FulfillmentType {
+  PICKUP
+  DELIVERY
+}
+
+enum OrderStatus {
+  NEW
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+model Order {
+  id            String          @id @default(cuid())
+  code          String
+  date          String // "2026-11-03" — fulfillment date (today, in this MVP)
+  fulfillment   FulfillmentType
+  branchId      String?
+  branch        Branch?         @relation(fields: [branchId], references: [id])
+  pickupSlot    String? // "14:30", pickup only
+  address       String? // delivery only
+  customerName  String
+  customerPhone String
+  totalCents    Int
+  status        OrderStatus     @default(NEW)
+  items         OrderItem[]
+  createdAt     DateTime        @default(now())
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  name       String // snapshot at order time
+  priceCents Int // snapshot at order time
+  qty        Int
+}
+
+enum DecorLevel {
+  SIMPLE
+  STANDARD
+  PREMIUM
+}
+
+enum CakeStatus {
+  NEW
+  DEPOSIT_PENDING
+  CONFIRMED
+  READY
+  CANCELLED
+}
+
+// One row per (date): the kitchen's production capacity in weight-units
+// for that day. Absent = DEFAULT_CAPACITY from lib/cake-config.ts applies.
+model CapacityOverride {
+  id    String @id @default(cuid())
+  date  String @unique
+  value Int
+}
+
+model CakeOrder {
+  id            String     @id @default(cuid())
+  date          String // readiness date "2026-11-05"
+  weightKg      Float
+  decor         DecorLevel
+  branchId      String
+  branch        Branch     @relation(fields: [branchId], references: [id])
+  customerName  String
+  customerPhone String
+  cakeText      String?
+  refImagePath  String?
+  priceCents    Int
+  status        CakeStatus @default(NEW)
+  holdExpiresAt DateTime?
+  createdAt     DateTime   @default(now())
+}
